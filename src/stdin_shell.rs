@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
+use windows::Win32::Foundation::HWND;
 
 pub struct StdinShell {
     rx_cmd: Receiver<StdinShellCommand>,
@@ -13,11 +14,13 @@ pub enum StdinShellCommand {
 
 pub enum StdinShellMessage {
     QuitRequested,
+    AllowHWND(Vec<HWND>),
 }
 
 enum Command {
     Nop,
     Quit,
+    AllowHWND(Vec<HWND>),
 }
 
 impl StdinShell {
@@ -48,6 +51,9 @@ impl StdinShell {
                     let _ = self.tx_msg.send(StdinShellMessage::QuitRequested);
                     break;
                 }
+                Ok(Command::AllowHWND(hwnds)) => {
+                    let _ = self.tx_msg.send(StdinShellMessage::AllowHWND(hwnds));
+                }
                 Err(e) => {
                     eprintln!("shell: {e}");
                 }
@@ -57,12 +63,25 @@ impl StdinShell {
 }
 
 fn parse_command(line: &str) -> Result<Command, String> {
-    if line.is_empty() {
+    if line.trim().is_empty() {
         return Ok(Command::Nop);
     }
 
-    if line == "quit" {
+    let args: Vec<_> = line.split_whitespace().collect();
+    if args[0] == "quit" {
         return Ok(Command::Quit);
+    }
+
+    if args[0].starts_with("allow") {
+        if args.len() == 1 {
+            return Err(format!("allow needs at least one HWND"));
+        }
+
+        let Ok(hwnds) = args[1..].iter().map(|arg| arg.parse().map(HWND)).collect() else {
+            return Err(format!("unknown HWND in allow"));
+        };
+
+        return Ok(Command::AllowHWND(hwnds));
     }
 
     Err(format!("unknown command: {line}"))

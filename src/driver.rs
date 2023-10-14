@@ -90,13 +90,13 @@ impl Driver {
     fn handle_foreground_watcher_message(&mut self, msg: ForegroundWatcherMessage) {
         match msg {
             ForegroundWatcherMessage::WindowChanged { hwnd } => {
-                self.current_hwnd = Some(hwnd);
-                if !self.caps.contains_key(&hwnd.0) {
-                    if self.allowed_hwnds.contains(&hwnd.0) {
+                if self.allowed_hwnds.contains(&hwnd.0) {
+                    self.current_hwnd = Some(hwnd);
+                    if !self.caps.contains_key(&hwnd.0) {
                         self.start_capture_for(hwnd);
-                    } else {
-                        eprintln!("[{:x}] not allowed", hwnd.0);
                     }
+                } else {
+                    eprintln!("[{}] not allowed", hwnd.0);
                 }
             }
         }
@@ -105,6 +105,9 @@ impl Driver {
     fn handle_stdin_shell_message(&mut self, msg: StdinShellMessage) {
         match msg {
             StdinShellMessage::QuitRequested => self.quit(),
+            StdinShellMessage::AllowHWND(hwnds) => {
+                self.allowed_hwnds.extend(hwnds.iter().map(|hwnd| hwnd.0))
+            }
         }
     }
 
@@ -162,7 +165,7 @@ impl Driver {
         }
 
         for hwnd_id in to_remove {
-            eprintln!("[{:x}] thread is finished", hwnd_id);
+            eprintln!("[{}] thread is finished", hwnd_id);
             if let Some(cap) = self.caps.remove(&hwnd_id) {
                 let _ = cap.thread.join();
             }

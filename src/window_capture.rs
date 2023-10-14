@@ -70,7 +70,7 @@ impl WindowCapture {
         );
 
         if let Err(e) = Handler::start(settings) {
-            eprintln!("[{:x}] failed to capture: {e:?}", self.hwnd.0);
+            eprintln!("[{}] failed to capture: {e:?}", self.hwnd.0);
             let _ = tx_msg.send(WindowCaptureMessage::Closed { hwnd: self.hwnd });
         }
     }
@@ -115,7 +115,7 @@ impl WindowsCaptureHandler for Handler {
         }
 
         let Ok(buffer) = frame.buffer() else {
-            eprintln!("[{:x}] failed to get frame buffer", self.args.hwnd.0);
+            eprintln!("[{}] failed to get frame buffer", self.args.hwnd.0);
             return;
         };
 
