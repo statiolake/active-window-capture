@@ -27,8 +27,12 @@ fn main() {
     );
 
     driver.run();
+    eprintln!("driver finished");
 
     viewer.join().unwrap();
+    eprintln!("viewer finished");
     watcher.join().unwrap();
+    eprintln!("watcher finished");
     shell.join().unwrap();
+    eprintln!("shell finished");
 }

@@ -29,6 +29,7 @@ pub struct Driver {
     sh_rx_msg: Receiver<StdinShellMessage>,
     caps: HashMap<isize, WindowCaptureInterop>,
     current_hwnd: Option<HWND>,
+    is_running: bool,
 }
 
 impl Driver {
@@ -49,11 +50,13 @@ impl Driver {
             sh_rx_msg,
             caps: HashMap::new(),
             current_hwnd: None,
+            is_running: false,
         }
     }
 
     pub fn run(mut self) {
-        loop {
+        self.is_running = true;
+        while self.is_running {
             if let Ok(msg) = self.im_rx_msg.try_recv() {
                 self.handle_image_viewer_message(msg);
             }
@@ -74,7 +77,7 @@ impl Driver {
         }
     }
 
-    fn handle_image_viewer_message(&self, msg: ImageViewerMessage) {
+    fn handle_image_viewer_message(&mut self, msg: ImageViewerMessage) {
         match msg {
             ImageViewerMessage::Closed => self.quit(),
         }
@@ -91,8 +94,10 @@ impl Driver {
         }
     }
 
-    fn handle_stdin_shell_message(&self, msg: StdinShellMessage) {
-        match msg {}
+    fn handle_stdin_shell_message(&mut self, msg: StdinShellMessage) {
+        match msg {
+            StdinShellMessage::QuitRequested => self.quit(),
+        }
     }
 
     fn handle_captures_message(&mut self) {
@@ -156,7 +161,8 @@ impl Driver {
         }
     }
 
-    fn quit(&self) {
+    fn quit(&mut self) {
+        self.is_running = false;
         let _ = self.im_tx_cmd.send(ImageViewerCommand::Quit);
         let _ = self.fw_tx_cmd.send(ForegroundWatcherCommand::Quit);
         let _ = self.sh_tx_cmd.send(StdinShellCommand::Quit);
