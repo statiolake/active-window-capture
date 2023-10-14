@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, BTreeSet},
     thread::{self, JoinHandle},
 };
 
@@ -27,7 +27,9 @@ pub struct Driver {
     fw_rx_msg: Receiver<ForegroundWatcherMessage>,
     sh_tx_cmd: Sender<StdinShellCommand>,
     sh_rx_msg: Receiver<StdinShellMessage>,
-    caps: HashMap<isize, WindowCaptureInterop>,
+
+    caps: BTreeMap<isize, WindowCaptureInterop>,
+    allowed_hwnds: BTreeSet<isize>,
     current_hwnd: Option<HWND>,
     is_running: bool,
 }
@@ -48,7 +50,9 @@ impl Driver {
             fw_rx_msg,
             sh_tx_cmd,
             sh_rx_msg,
-            caps: HashMap::new(),
+
+            caps: BTreeMap::new(),
+            allowed_hwnds: BTreeSet::new(),
             current_hwnd: None,
             is_running: false,
         }
@@ -88,7 +92,11 @@ impl Driver {
             ForegroundWatcherMessage::WindowChanged { hwnd } => {
                 self.current_hwnd = Some(hwnd);
                 if !self.caps.contains_key(&hwnd.0) {
-                    self.start_capture_for(hwnd);
+                    if self.allowed_hwnds.contains(&hwnd.0) {
+                        self.start_capture_for(hwnd);
+                    } else {
+                        eprintln!("[{:x}] not allowed", hwnd.0);
+                    }
                 }
             }
         }
