@@ -108,6 +108,12 @@ impl Driver {
             StdinShellMessage::AllowHWND(hwnds) => {
                 self.allowed_hwnds.extend(hwnds.iter().map(|hwnd| hwnd.0))
             }
+            StdinShellMessage::ListRequested => {
+                let allowed_hwnds = self.allowed_hwnds.iter().copied().map(HWND).collect();
+                let _ = self
+                    .sh_tx_cmd
+                    .send(StdinShellCommand::ListResponse { allowed_hwnds });
+            }
         }
     }
 
