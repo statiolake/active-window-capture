@@ -1,23 +1,11 @@
-use crossbeam_channel::{bounded, select, unbounded, Receiver, Select, Sender};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use show_image::{create_window, Color, ImageInfo, ImageView, WindowOptions, WindowProxy};
-use std::{
-    collections::HashMap,
-    thread::{self, JoinHandle},
-};
-use std::{mem, slice};
-use windows::Win32::Foundation::HWND;
-use windows_capture::{
-    capture::{WindowsCaptureHandler, WindowsCaptureSettings},
-    frame::{Frame, RGBA},
-    window::Window,
-};
 
 use crate::window_capture::CapturedFrame;
 
 pub struct ImageViewer {
     rx_cmd: Receiver<ImageViewerCommand>,
     tx_msg: Sender<ImageViewerMessage>,
-    active_hwnd: Option<HWND>,
     is_running: bool,
 }
 
@@ -26,7 +14,9 @@ pub enum ImageViewerCommand {
     Quit,
 }
 
-pub enum ImageViewerMessage {}
+pub enum ImageViewerMessage {
+    Closed,
+}
 
 impl ImageViewer {
     pub fn new() -> (
@@ -41,7 +31,6 @@ impl ImageViewer {
             ImageViewer {
                 rx_cmd,
                 tx_msg,
-                active_hwnd: None,
                 is_running: false,
             },
             tx_cmd,
@@ -74,7 +63,9 @@ impl ImageViewer {
             ImageViewerCommand::Update(frame) => {
                 let image =
                     ImageView::new(ImageInfo::rgba8(frame.width, frame.height), &frame.bytes);
-                window.set_image("capture", image).unwrap();
+                if window.set_image("capture", image).is_err() {
+                    let _ = self.tx_msg.send(ImageViewerMessage::Closed);
+                }
             }
             ImageViewerCommand::Quit => self.is_running = false,
         }

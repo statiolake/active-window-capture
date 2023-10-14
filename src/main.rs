@@ -1,25 +1,8 @@
-use crossbeam_channel::{bounded, select, unbounded, Receiver, Select, Sender};
-use foreground_watcher::{ForegroundWatcherCommand, ForegroundWatcherMessage};
-use image_viewer::{ImageViewerCommand, ImageViewerMessage};
-use show_image::{
-    create_window, winit::platform::windows::HWND, Color, ImageInfo, ImageView, WindowOptions,
-    WindowProxy,
-};
-use std::{
-    collections::HashMap,
-    thread::{self, JoinHandle},
-};
-use std::{mem, slice};
-use stdin_shell::{StdinShellCommand, StdinShellMessage};
-use window_capture::{WindowCapture, WindowCaptureMessage};
-use windows_capture::{
-    capture::{WindowsCaptureHandler, WindowsCaptureSettings},
-    frame::{Frame, RGBA},
-    window::Window,
-};
+use std::thread::{self};
 
 use crate::{
-    foreground_watcher::ForegroundWatcher, image_viewer::ImageViewer, stdin_shell::StdinShell,
+    driver::Driver, foreground_watcher::ForegroundWatcher, image_viewer::ImageViewer,
+    stdin_shell::StdinShell,
 };
 
 pub mod driver;
@@ -30,9 +13,7 @@ pub mod window_capture;
 
 #[show_image::main]
 fn main() {
-    let (tx_frame, rx_frame) = bounded(5);
-
-    let (viewer, im_tx_cmd, im_rx_msg) = ImageViewer::new(rx_frame);
+    let (viewer, im_tx_cmd, im_rx_msg) = ImageViewer::new();
     let viewer = thread::spawn(move || viewer.run());
 
     let (watcher, fw_tx_cmd, fw_rx_msg) = ForegroundWatcher::new();

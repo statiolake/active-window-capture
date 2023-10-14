@@ -1,9 +1,4 @@
-use crossbeam_channel::{bounded, select, unbounded, Receiver, Select, Sender};
-use show_image::{create_window, Color, ImageInfo, ImageView, WindowOptions, WindowProxy};
-use std::{
-    collections::HashMap,
-    thread::{self, JoinHandle},
-};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::{mem, slice};
 use windows::Win32::Foundation::HWND;
 use windows_capture::{
@@ -20,7 +15,7 @@ pub struct CapturedFrame {
 }
 
 pub struct WindowCapture {
-    rx_cmd: Receiver<WindowCaptureCommand>,
+    _rx_cmd: Receiver<WindowCaptureCommand>,
     tx_msg: Sender<WindowCaptureMessage>,
     hwnd: HWND,
     tx_frame: Sender<CapturedFrame>,
@@ -46,7 +41,7 @@ impl WindowCapture {
 
         (
             WindowCapture {
-                rx_cmd,
+                _rx_cmd: rx_cmd,
                 tx_msg,
                 hwnd,
                 tx_frame,
@@ -56,7 +51,7 @@ impl WindowCapture {
         )
     }
 
-    pub fn run(mut self) {
+    pub fn run(self) {
         let settings = WindowsCaptureSettings::new(
             Window::from_hwnd(self.hwnd),
             true,
@@ -99,9 +94,8 @@ impl WindowsCaptureHandler for Handler {
         );
 
         for i in 0..buffer.height() as usize {
-            let start = i * width32 * mem::size_of::<RGBA>();
-            let row_pixels =
-                &pixels[start..(start + buffer.width() as usize * mem::size_of::<RGBA>())];
+            let start = i * width32;
+            let row_pixels = &pixels[start..(start + buffer.width() as usize)];
             let row_bytes = unsafe {
                 slice::from_raw_parts(
                     row_pixels as *const _ as *const u8,
@@ -111,19 +105,17 @@ impl WindowsCaptureHandler for Handler {
             bytes.extend(row_bytes);
         }
 
-        self.tx_frame
-            .send(CapturedFrame {
-                hwnd: self.hwnd,
-                width: buffer.width(),
-                height: buffer.height(),
-                bytes,
-            })
-            .unwrap();
+        let _ = self.tx_frame.send(CapturedFrame {
+            hwnd: self.hwnd,
+            width: buffer.width(),
+            height: buffer.height(),
+            bytes,
+        });
     }
 
     fn on_closed(&mut self) {
-        self.rx_msg
-            .send(WindowCaptureMessage::Closed { hwnd: self.hwnd })
-            .unwrap();
+        let _ = self
+            .rx_msg
+            .send(WindowCaptureMessage::Closed { hwnd: self.hwnd });
     }
 }
