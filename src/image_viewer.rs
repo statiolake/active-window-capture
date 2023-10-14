@@ -39,15 +39,16 @@ impl ImageViewer {
     }
 
     pub fn run(mut self) {
-        let window = create_window(
+        let Ok(window) = create_window(
             "Capture",
             WindowOptions::new()
                 .set_background_color(Color::rgb(0.0, 1.0, 0.0))
                 .set_fullscreen(true)
                 .set_preserve_aspect_ratio(true)
                 .set_default_controls(false),
-        )
-        .unwrap();
+        ) else {
+            return;
+        };
 
         self.is_running = true;
 

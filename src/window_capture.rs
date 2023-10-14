@@ -65,7 +65,7 @@ impl WindowCapture {
                 tx_msg: self.tx_msg,
                 hwnd: self.hwnd,
                 tx_frame: self.tx_frame,
-                fps: 30,
+                fps: 60,
             },
         );
 
@@ -114,7 +114,10 @@ impl WindowsCaptureHandler for Handler {
             return;
         }
 
-        let buffer = frame.buffer().unwrap();
+        let Ok(buffer) = frame.buffer() else {
+            eprintln!("[{}] failed to get frame buffer", self.args.hwnd.0);
+            return;
+        };
 
         // バッファは画像幅を32の倍数に切り上げて送ってくるらしいので、バッファの幅を計算する。
         let width32 = ((buffer.width() + 31) / 32 * 32) as usize;
