@@ -1,5 +1,8 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use std::{mem, slice};
+use std::{
+    mem, slice,
+    time::{Duration, Instant},
+};
 use windows::Win32::Foundation::HWND;
 use windows_capture::{
     capture::{WindowsCaptureHandler, WindowsCaptureSettings},
@@ -52,34 +55,65 @@ impl WindowCapture {
     }
 
     pub fn run(self) {
+        let tx_msg = self.tx_msg.clone();
+
         let settings = WindowsCaptureSettings::new(
             Window::from_hwnd(self.hwnd),
             true,
             false,
-            (self.tx_msg, self.hwnd, self.tx_frame),
+            WindowCaptureArgs {
+                tx_msg: self.tx_msg,
+                hwnd: self.hwnd,
+                tx_frame: self.tx_frame,
+                fps: 30,
+            },
         );
-        Handler::start(settings).unwrap();
+
+        if let Err(e) = Handler::start(settings) {
+            eprintln!("failed to capture {:x}: {e:?}", self.hwnd.0);
+            let _ = tx_msg.send(WindowCaptureMessage::Closed { hwnd: self.hwnd });
+        }
     }
 }
 
-pub struct Handler {
-    rx_msg: Sender<WindowCaptureMessage>,
-    tx_frame: Sender<CapturedFrame>,
+pub struct WindowCaptureArgs {
+    tx_msg: Sender<WindowCaptureMessage>,
     hwnd: HWND,
+    tx_frame: Sender<CapturedFrame>,
+    fps: u64,
+}
+
+pub struct Handler {
+    args: WindowCaptureArgs,
+    next_update: Instant,
+}
+
+impl Handler {
+    fn compute_next_update(&mut self) {
+        let mut next_update = self.next_update + Duration::from_millis(1000 / self.args.fps);
+        let now = Instant::now();
+        if now < next_update {
+            next_update = now + Duration::from_millis(1000 / self.args.fps);
+        }
+        self.next_update = next_update;
+    }
 }
 
 impl WindowsCaptureHandler for Handler {
-    type Flags = (Sender<WindowCaptureMessage>, HWND, Sender<CapturedFrame>);
+    type Flags = WindowCaptureArgs;
 
-    fn new((rx_msg, hwnd, tx_frame): Self::Flags) -> Self {
+    fn new(args: Self::Flags) -> Self {
         Self {
-            rx_msg,
-            hwnd,
-            tx_frame,
+            args,
+            next_update: Instant::now(),
         }
     }
 
     fn on_frame_arrived(&mut self, frame: &Frame) {
+        if Instant::now() < self.next_update {
+            return;
+        }
+
         let buffer = frame.buffer().unwrap();
 
         // バッファは画像幅を32の倍数に切り上げて送ってくるらしいので、バッファの幅を計算する。
@@ -105,17 +139,19 @@ impl WindowsCaptureHandler for Handler {
             bytes.extend(row_bytes);
         }
 
-        let _ = self.tx_frame.send(CapturedFrame {
-            hwnd: self.hwnd,
+        let _ = self.args.tx_frame.send(CapturedFrame {
+            hwnd: self.args.hwnd,
             width: buffer.width(),
             height: buffer.height(),
             bytes,
         });
+
+        self.compute_next_update();
     }
 
     fn on_closed(&mut self) {
-        let _ = self
-            .rx_msg
-            .send(WindowCaptureMessage::Closed { hwnd: self.hwnd });
+        let _ = self.args.tx_msg.send(WindowCaptureMessage::Closed {
+            hwnd: self.args.hwnd,
+        });
     }
 }
