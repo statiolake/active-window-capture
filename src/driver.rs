@@ -27,7 +27,7 @@ pub struct Driver {
     fw_rx_msg: Receiver<ForegroundWatcherMessage>,
     sh_tx_cmd: Sender<StdinShellCommand>,
     sh_rx_msg: Receiver<StdinShellMessage>,
-    cap_rxs: HashMap<isize, WindowCaptureInterop>,
+    caps: HashMap<isize, WindowCaptureInterop>,
     current_hwnd: Option<HWND>,
 }
 
@@ -47,7 +47,7 @@ impl Driver {
             fw_rx_msg,
             sh_tx_cmd,
             sh_rx_msg,
-            cap_rxs: HashMap::new(),
+            caps: HashMap::new(),
             current_hwnd: None,
         }
     }
@@ -69,6 +69,8 @@ impl Driver {
             self.handle_captures_message();
 
             self.handle_captures_frames();
+
+            self.cleanup_threads();
         }
     }
 
@@ -82,7 +84,7 @@ impl Driver {
         match msg {
             ForegroundWatcherMessage::WindowChanged { hwnd } => {
                 self.current_hwnd = Some(hwnd);
-                if !self.cap_rxs.contains_key(&hwnd.0) {
+                if !self.caps.contains_key(&hwnd.0) {
                     self.start_capture_for(hwnd);
                 }
             }
@@ -95,7 +97,7 @@ impl Driver {
 
     fn handle_captures_message(&mut self) {
         let mut to_remove = vec![];
-        for WindowCaptureInterop { rx_msg, .. } in self.cap_rxs.values_mut() {
+        for WindowCaptureInterop { rx_msg, .. } in self.caps.values_mut() {
             if let Ok(msg) = rx_msg.try_recv() {
                 match msg {
                     WindowCaptureMessage::Closed { hwnd } => {
@@ -107,14 +109,14 @@ impl Driver {
 
         // すでに閉じられたウィンドウを削除する
         for hwnd in to_remove {
-            if let Some(cap) = self.cap_rxs.remove(&hwnd.0) {
+            if let Some(cap) = self.caps.remove(&hwnd.0) {
                 let _ = cap.thread.join();
             }
         }
     }
 
     fn handle_captures_frames(&mut self) {
-        for WindowCaptureInterop { rx_frame, .. } in self.cap_rxs.values_mut() {
+        for WindowCaptureInterop { rx_frame, .. } in self.caps.values_mut() {
             if let Ok(frame) = rx_frame.try_recv() {
                 if Some(frame.hwnd) == self.current_hwnd {
                     let _ = self.im_tx_cmd.send(ImageViewerCommand::Update(frame));
@@ -127,7 +129,7 @@ impl Driver {
         let (tx_frame, rx_frame) = bounded(5);
         let (capture, tx_cmd, rx_msg) = WindowCapture::new(hwnd, tx_frame);
         let thread = thread::spawn(move || capture.run());
-        self.cap_rxs.insert(
+        self.caps.insert(
             hwnd.0,
             WindowCaptureInterop {
                 _tx_cmd: tx_cmd,
@@ -136,6 +138,22 @@ impl Driver {
                 thread,
             },
         );
+    }
+
+    fn cleanup_threads(&mut self) {
+        let mut to_remove = vec![];
+        for (hwnd_id, WindowCaptureInterop { thread, .. }) in &self.caps {
+            if thread.is_finished() {
+                to_remove.push(*hwnd_id);
+            }
+        }
+
+        for hwnd_id in to_remove {
+            eprintln!("[{:x}] thread is finished", hwnd_id);
+            if let Some(cap) = self.caps.remove(&hwnd_id) {
+                let _ = cap.thread.join();
+            }
+        }
     }
 
     fn quit(&self) {
