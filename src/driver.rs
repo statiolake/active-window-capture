@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt::Write,
     thread::{self, JoinHandle},
 };
 
@@ -96,7 +97,10 @@ impl Driver {
                         self.start_capture_for(hwnd);
                     }
                 } else {
-                    eprintln!("[{}] not allowed", hwnd.0);
+                    let hwnd_id = hwnd.0;
+                    let _ = self.sh_tx_cmd.send(StdinShellCommand::Output {
+                        message: format!("[{hwnd_id}] not allowed"),
+                    });
                 }
             }
         }
@@ -109,10 +113,15 @@ impl Driver {
                 self.allowed_hwnds.extend(hwnds.iter().map(|hwnd| hwnd.0))
             }
             StdinShellMessage::ListRequested => {
-                let allowed_hwnds = self.allowed_hwnds.iter().copied().map(HWND).collect();
+                let mut buf = String::new();
+                writeln!(buf, "Got allowed HWNDs:").unwrap();
+                for hwnd_id in &self.allowed_hwnds {
+                    writeln!(buf, "| {}", hwnd_id).unwrap();
+                }
+
                 let _ = self
                     .sh_tx_cmd
-                    .send(StdinShellCommand::ListResponse { allowed_hwnds });
+                    .send(StdinShellCommand::Output { message: buf });
             }
         }
     }
@@ -124,6 +133,9 @@ impl Driver {
                 match msg {
                     WindowCaptureMessage::Closed { hwnd } => {
                         to_remove.push(hwnd);
+                    }
+                    WindowCaptureMessage::Output { message } => {
+                        let _ = self.sh_tx_cmd.send(StdinShellCommand::Output { message });
                     }
                 }
             }
@@ -171,7 +183,9 @@ impl Driver {
         }
 
         for hwnd_id in to_remove {
-            eprintln!("[{}] thread is finished", hwnd_id);
+            let _ = self.sh_tx_cmd.send(StdinShellCommand::Output {
+                message: format!("[{hwnd_id}] thread is finished"),
+            });
             if let Some(cap) = self.caps.remove(&hwnd_id) {
                 let _ = cap.thread.join();
             }

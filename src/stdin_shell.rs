@@ -1,11 +1,7 @@
-use std::{
-    ffi::OsString,
-    fmt::Write as _,
-    io::{self, Write as _},
-    os::windows::prelude::OsStringExt,
-};
+use std::{ffi::OsString, fmt::Write as _, os::windows::prelude::OsStringExt, thread};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
+use rustyline::{DefaultEditor, ExternalPrinter};
 use windows::Win32::{
     Foundation::{BOOL, HWND, LPARAM},
     UI::WindowsAndMessaging::{EnumWindows, GetWindowLongW, GetWindowTextW, GWL_STYLE},
@@ -19,7 +15,7 @@ pub struct StdinShell {
 
 pub enum StdinShellCommand {
     Quit,
-    ListResponse { allowed_hwnds: Vec<HWND> },
+    Output { message: String },
 }
 
 pub enum StdinShellMessage {
@@ -34,7 +30,7 @@ struct ScanEntry {
     title: String,
 }
 
-enum Command {
+enum UserInput {
     Nop,
     Quit,
     AllowHWND(Vec<HWND>),
@@ -59,53 +55,50 @@ impl StdinShell {
     }
 
     pub fn run(mut self) {
+        let mut editor = DefaultEditor::new().expect("failed to prepare readline");
+        let mut printer = editor
+            .create_external_printer()
+            .expect("failed to get printer");
+
+        let (tx_input, rx_input) = unbounded();
+        thread::spawn(move || keep_asking(editor, tx_input));
+
         loop {
+            if let Ok(line) = rx_input.try_recv() {
+                match self.parse_command(&line) {
+                    Ok(UserInput::Nop) => {}
+                    Ok(UserInput::Quit) => {
+                        let _ = self.tx_msg.send(StdinShellMessage::QuitRequested);
+                        break;
+                    }
+                    Ok(UserInput::AllowHWND(hwnds)) => {
+                        let _ = self.tx_msg.send(StdinShellMessage::AllowHWND(hwnds));
+                    }
+                    Ok(UserInput::List) => {
+                        let _ = self.tx_msg.send(StdinShellMessage::ListRequested);
+                        printer
+                            .print("Requesting allowed HWNDs, press Enter to refresh...".into())
+                            .unwrap();
+                    }
+                    Ok(UserInput::Scan) => {
+                        self.scan(&mut printer);
+                    }
+                    Err(e) => printer.print(format!("shell: {e}")).unwrap(),
+                }
+            };
+
             if let Ok(cmd) = self.rx_cmd.try_recv() {
                 match cmd {
                     StdinShellCommand::Quit => break,
-                    StdinShellCommand::ListResponse { allowed_hwnds } => {
-                        let mut buf = String::new();
-                        writeln!(buf, "Got allowed HWNDs:").unwrap();
-                        for hwnd in allowed_hwnds {
-                            writeln!(buf, "| {}", hwnd.0).unwrap();
-                        }
-
-                        // エラー出力などに紛れないよう一括出力
-                        println!("{buf}");
+                    StdinShellCommand::Output { message } => {
+                        printer.print(message).unwrap();
                     }
-                }
-            }
-
-            print!("shell> ");
-            std::io::stdout().flush().unwrap();
-            let stdin = io::stdin();
-            let mut line = String::new();
-            stdin.read_line(&mut line).unwrap();
-
-            match self.parse_command(line.trim()) {
-                Ok(Command::Nop) => {}
-                Ok(Command::Quit) => {
-                    let _ = self.tx_msg.send(StdinShellMessage::QuitRequested);
-                    break;
-                }
-                Ok(Command::AllowHWND(hwnds)) => {
-                    let _ = self.tx_msg.send(StdinShellMessage::AllowHWND(hwnds));
-                }
-                Ok(Command::List) => {
-                    let _ = self.tx_msg.send(StdinShellMessage::ListRequested);
-                    println!("Requesting allowed HWNDs, press Enter to refresh...");
-                }
-                Ok(Command::Scan) => {
-                    self.scan();
-                }
-                Err(e) => {
-                    eprintln!("shell: {e}");
                 }
             }
         }
     }
 
-    fn scan(&mut self) {
+    fn scan<E: ExternalPrinter>(&mut self, printer: &mut E) {
         let mut scan_result = enumerate_windows();
         for (alias, entry) in ('A'..='Z').zip(&mut scan_result) {
             entry.alias = Some(alias);
@@ -124,28 +117,29 @@ impl StdinShell {
             )
             .unwrap();
         }
-        println!("{buf}");
+
+        printer.print(buf).unwrap();
 
         self.scan_result = scan_result;
     }
 
-    fn parse_command(&self, line: &str) -> Result<Command, String> {
+    fn parse_command(&self, line: &str) -> Result<UserInput, String> {
         if line.trim().is_empty() {
-            return Ok(Command::Nop);
+            return Ok(UserInput::Nop);
         }
 
         let args: Vec<_> = line.split_whitespace().collect();
 
         if args[0] == "quit" {
-            return Ok(Command::Quit);
+            return Ok(UserInput::Quit);
         }
 
         if args[0] == "list" {
-            return Ok(Command::List);
+            return Ok(UserInput::List);
         }
 
         if args[0] == "scan" {
-            return Ok(Command::Scan);
+            return Ok(UserInput::Scan);
         }
 
         if args[0].starts_with("allow") {
@@ -165,16 +159,27 @@ impl StdinShell {
                 }
 
                 let Ok(hwnd) = arg.parse() else {
-                    return Err(format!("unknown HWND {arg} in allow"));
-                };
+                return Err(format!("unknown HWND {arg} in allow"));
+            };
 
                 hwnds.push(HWND(hwnd));
             }
 
-            return Ok(Command::AllowHWND(hwnds));
+            return Ok(UserInput::AllowHWND(hwnds));
         }
 
         Err(format!("unknown command: {line}"))
+    }
+}
+
+fn keep_asking(mut editor: DefaultEditor, sender: Sender<String>) {
+    loop {
+        let Ok(line) = editor.readline("shell> ") else {
+            let _ = sender.send("quit".into());
+            break;
+        };
+
+        let _ = sender.send(line);
     }
 }
 

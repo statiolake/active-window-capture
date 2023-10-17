@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 crossbeam = "0.8.2"
 crossbeam-channel = "0.5.8"
+rustyline = "12.0.0"
 show-image = "0.13.1"
 windows = { version = "0.51.1", features = ["Foundation"] }
 windows-capture = "1.0.19"

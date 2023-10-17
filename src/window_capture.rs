@@ -27,6 +27,7 @@ pub struct WindowCapture {
 pub enum WindowCaptureCommand {}
 
 pub enum WindowCaptureMessage {
+    Output { message: String },
     Closed { hwnd: HWND },
 }
 
@@ -70,7 +71,9 @@ impl WindowCapture {
         );
 
         if let Err(e) = Handler::start(settings) {
-            eprintln!("[{}] failed to capture: {e:?}", self.hwnd.0);
+            let _ = tx_msg.send(WindowCaptureMessage::Output {
+                message: (format!("[{}] failed to capture: {e:?}", self.hwnd.0)),
+            });
             let _ = tx_msg.send(WindowCaptureMessage::Closed { hwnd: self.hwnd });
         }
     }
@@ -115,7 +118,9 @@ impl WindowsCaptureHandler for Handler {
         }
 
         let Ok(buffer) = frame.buffer() else {
-            eprintln!("[{}] failed to get frame buffer", self.args.hwnd.0);
+            let _ = self.args.tx_msg.send(WindowCaptureMessage::Output {
+                message: format!("[{}] failed to get frame buffer", self.args.hwnd.0),
+            });
             return;
         };
 
